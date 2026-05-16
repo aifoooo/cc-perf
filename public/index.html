@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>cc-perf — Claude Code Performance Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.umd.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
 <style>
   :root {
     --bg: #0d1117;
@@ -109,18 +111,72 @@
     letter-spacing: 0.5px;
   }
   .chart-box canvas { max-height: 400px; }
-  .gantt-scroll-container {
-    height: 70vh;
+  .gantt-container {
+    height: 60vh;
     overflow-y: auto;
-    overflow-x: hidden;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: #000;
+    background: #0d1117;
   }
-  .gantt-canvas-wrap {
-    position: relative;
-    width: 100%;
+  /* Frappe Gantt 深色主题覆盖 */
+  .gantt-container .gantt {
+    background: #0d1117;
   }
+  .gantt-container .grid-row {
+    fill: #161b22;
+  }
+  .gantt-container .grid-header {
+    fill: #161b22;
+  }
+  .gantt-container .row-line {
+    stroke: #30363d;
+  }
+  .gantt-container .tick {
+    stroke: #30363d;
+  }
+  .gantt-container .row-text {
+    fill: #8b949e;
+    font-size: 11px;
+  }
+  .gantt-container .lower-text, .gantt-container .upper-text {
+    fill: #8b949e;
+    font-size: 10px;
+  }
+  .gantt-container .bar {
+    rx: 4;
+    ry: 4;
+  }
+  .gantt-container .bar-progress {
+    fill: rgba(88, 166, 255, 0.3);
+  }
+  .gantt-container .bar-invalid {
+    fill: transparent;
+  }
+  .gantt-container .popup-wrapper {
+    background: #161b22;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .gantt-container .popup-wrapper .title {
+    color: var(--accent);
+  }
+  /* 工具类型颜色 */
+  .gantt-container .bar-bash { fill: rgba(255,99,132,0.85); }
+  .gantt-container .bar-read { fill: rgba(54,162,235,0.85); }
+  .gantt-container .bar-write { fill: rgba(255,205,86,0.85); }
+  .gantt-container .bar-edit { fill: rgba(75,192,192,0.85); }
+  .gantt-container .bar-agent { fill: rgba(153,102,255,0.85); }
+  .gantt-container .bar-grep { fill: rgba(255,159,64,0.85); }
+  .gantt-container .bar-glob { fill: rgba(201,203,207,0.85); }
+  .gantt-container .bar-webfetch { fill: rgba(123,200,164,0.85); }
+  .gantt-container .bar-websearch { fill: rgba(232,160,191,0.85); }
+  .gantt-container .bar-taskoutput { fill: rgba(148,148,148,0.85); }
+  .gantt-container .bar-skill { fill: rgba(100,200,200,0.85); }
+  .gantt-container .bar-bash .bar-progress { fill: rgba(255,99,132,0.4); }
+  .gantt-container .bar-read .bar-progress { fill: rgba(54,162,235,0.4); }
+  .gantt-container .bar-write .bar-progress { fill: rgba(255,205,86,0.4); }
+  .gantt-container .bar-edit .bar-progress { fill: rgba(75,192,192,0.4); }
+  .gantt-container .bar-agent .bar-progress { fill: rgba(153,102,255,0.4); }
   .slow-table {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -207,10 +263,8 @@
 <div class="chart-row">
   <div class="chart-box">
     <h2>时间线（甘特图）</h2>
-    <div class="gantt-scroll-container" id="gantt-scroll">
-      <div class="gantt-canvas-wrap">
-        <canvas id="gantt-chart"></canvas>
-      </div>
+    <div class="gantt-container">
+      <div id="gantt-chart"></div>
     </div>
   </div>
   <div class="chart-box">
@@ -335,88 +389,56 @@ function renderSummary(data) {
 }
 
 function renderGantt(data) {
-  const ctx = document.getElementById('gantt-chart');
-  if (!ctx) return;
+  const container = document.getElementById('gantt-chart');
+  if (!container) return;
 
   if (data.length === 0) {
-    if (ganttChart) { ganttChart.destroy(); ganttChart = null; }
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">暂无数据</div>';
+    ganttChart = null;
     return;
   }
 
-  const minStart = data.reduce((m, e) => Math.min(m, e.start), Infinity);
-  // 按 start 排序，分配 Y 索引
+  // 按 start 排序
   const sorted = [...data].sort((a, b) => a.start - b.start);
-  const labels = sorted.map((e, i) => {
-    const short = (e.tool_input_summary || '').substring(0, 30);
-    return `${i+1}. ${e.tool_name}`;
+
+  // 转换为 Frappe Gantt 格式
+  const tasks = sorted.map((e, i) => {
+    const startDate = new Date(e.start);
+    const endDate = new Date(e.end);
+    // 格式化为 YYYY-MM-DD HH:mm
+    const formatDate = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    const summary = (e.tool_input_summary || '').substring(0, 40);
+
+    return {
+      id: e.tool_use_id || `task-${i}`,
+      name: `${i + 1}. ${e.tool_name}: ${summary}`,
+      start: formatDate(startDate),
+      end: formatDate(endDate),
+      progress: e.success ? 100 : 50,
+      custom_class: `bar-${e.tool_name.toLowerCase().replace(/[^a-z]/g, '')}`,
+    };
   });
 
-  const datasets = [];
-  // 按工具类型分组，以便不同颜色
-  const byTool = {};
-  sorted.forEach(e => {
-    if (!byTool[e.tool_name]) byTool[e.tool_name] = [];
-    byTool[e.tool_name].push(e);
-  });
+  // 清空容器
+  container.innerHTML = '';
 
-  for (const [tool, entries] of Object.entries(byTool)) {
-    const indices = entries.map(e => sorted.indexOf(e));
-    datasets.push({
-      label: tool,
-      data: entries.map(e => ({
-        x: [(e.start - minStart) / 1000, (e.end - minStart) / 1000],
-        y: sorted.indexOf(e),
-      })),
-      backgroundColor: toolColor(tool),
-      borderColor: toolBorder(tool),
-      borderWidth: 1,
-      borderSkipped: false,
-      borderRadius: 3,
-      barPercentage: 0.8,
-    });
-  }
-
-  if (ganttChart) ganttChart.destroy();
-
-  // 设置 wrapper 高度让容器可以滚动
-  const rowHeight = 24;
-  const wrapper = document.querySelector('.gantt-canvas-wrap');
-  if (wrapper) {
-    wrapper.style.height = `${sorted.length * rowHeight}px`;
-  }
-
-  ganttChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets,
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, position: 'top', labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 }, padding: 8 } },
-        tooltip: {
-          callbacks: {
-            label(ctx) {
-              const d = sorted[ctx.dataIndex];
-              return `${d.tool_name}: ${formatDuration(d.duration_ms)} — ${d.tool_input_summary || ''}`;
-            }
-          }
-        },
-      },
-      scales: {
-        x: {
-          title: { text: '相对时间（秒）', display: true, color: '#8b949e' },
-          ticks: { color: '#8b949e', font: { size: 10 } },
-          grid: { color: '#21262d' },
-        },
-        y: {
-          ticks: { color: '#8b949e', font: { size: 9 }, stepSize: 1, maxTicksLimit: 500, autoSkip: false },
-          grid: { display: false },
-        },
-      },
+  // 创建 Frappe Gantt
+  ganttChart = new Gantt('#gantt-chart', tasks, {
+    view_mode: 'Day',
+    date_format: 'YYYY-MM-DD HH:mm',
+    popup: function(task) {
+      const entry = sorted.find((e, i) => `task-${i}` === task.id || e.tool_use_id === task.id);
+      const duration = entry ? formatDuration(entry.duration_ms) : '--';
+      return `
+        <div class="details-container">
+          <h5 style="margin:0 0 4px 0;font-size:12px;">${task.name}</h5>
+          <p style="margin:0;font-size:11px;color:#8b949e;">耗时: ${duration}</p>
+        </div>
+      `;
     },
   });
 }
