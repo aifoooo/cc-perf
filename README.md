@@ -8,27 +8,58 @@
 
 ---
 
-## 安装
+## 组件结构
+
+cc-perf 由两个独立组件构成：
+
+| 组件 | 安装 | 卸载 | 说明 |
+|------|------|------|------|
+| **cc-perf 核心** | `bash install.sh` | `bash uninstall.sh` | 插件 + hooks + /perf 命令 |
+| **cc-switch-watch** | `./scripts/cc-switch-watch.sh --install` | `./scripts/cc-switch-watch.sh --uninstall` 或 `uninstall.sh` | 监听 cc-switch 切换，自动恢复配置（可选） |
+
+---
+
+## 快速开始
+
+### 1. 安装 cc-perf 核心
 
 ```bash
 bash install.sh
 ```
 
-一行搞定。脚本自动完成：
+脚本自动完成：
 
 1. **注册插件** — symlink + installed_plugins.json
 2. **启用插件** — settings.json enabledPlugins
 3. **配置 hooks** — settings.json 中合并 PreToolUse/PostToolUse hooks
-4. **注册 /perf 命令** — 复制到 `~/.claude/commands/`，使用绝对路径，不依赖插件 symlink
+4. **注册 /perf 命令** — 复制到 `~/.claude/commands/`
 5. **验证** — 端到端测试
 
 > 安装后**重启 Claude Code**（新会话），hooks 和 `/perf` 才会同时生效。
 
-卸载：
+### 2. 可选：安装 cc-switch-watch（如果你用 cc-switch）
 
 ```bash
-bash uninstall.sh
+# 方式 1：后台守护进程（轮询模式）
+./scripts/cc-switch-watch.sh --polling
+
+# 方式 2：安装为 LaunchAgent（开机自启）
+./scripts/cc-switch-watch.sh --install
 ```
+
+cc-switch 切换配置时会覆盖 `settings.json`，导致 cc-perf 配置丢失。cc-switch-watch 通过监听文件变化，自动运行 `install.sh --force` 恢复配置。
+
+### 3. 可选：启动 Web 仪表板
+
+```bash
+# 方式 1：斜杠命令（在 Claude Code 中）
+/perf start
+
+# 方式 2：直接启动
+node scripts/server.js
+```
+
+浏览器打开 `http://127.0.0.1:3100`。
 
 ---
 
@@ -49,16 +80,6 @@ bash uninstall.sh
 
 ### Web 仪表板
 
-```bash
-# 方式 1：斜杠命令（在 Claude Code 中）
-/perf start
-
-# 方式 2：直接启动
-node scripts/server.js
-```
-
-浏览器打开 `http://127.0.0.1:3100`，你会看到：
-
 | 面板 | 回答什么问题 |
 |------|-------------|
 | 概览卡片 | 这次会话总共花了多少时间？调用了多少次工具？ |
@@ -77,14 +98,27 @@ node scripts/server.js
 
 ## 命令参考
 
+### cc-perf 核心
+
 | 命令 | 作用 |
 |------|------|
+| `bash install.sh` | 一键安装 |
+| `bash uninstall.sh` | 一键卸载（同时清理 cc-switch-watch） |
 | `/perf` | 当前会话耗时摘要 |
 | `/perf start` | 启动仪表板 + 打开浏览器 |
 | `/perf stop` | 停止仪表板 |
-| `bash install.sh` | 一键安装 |
-| `bash uninstall.sh` | 一键卸载 |
-| `node scripts/server.js` | 前台启动仪表板 |
+
+### cc-switch-watch
+
+| 命令 | 作用 |
+|------|------|
+| `./scripts/cc-switch-watch.sh` | 前台运行（使用 fswatch） |
+| `./scripts/cc-switch-watch.sh --polling` | 前台运行（轮询模式，无需额外依赖） |
+| `./scripts/cc-switch-watch.sh --install` | 安装为 LaunchAgent（开机自启） |
+| `./scripts/cc-switch-watch.sh --uninstall` | 卸载 LaunchAgent |
+| `./scripts/cc-switch-watch.sh --stop` | 停止守护进程 |
+| `./scripts/cc-switch-watch.sh --status` | 查看状态 |
+| `./scripts/cc-switch-watch.sh --help` | 显示帮助 |
 
 ---
 
@@ -96,34 +130,11 @@ node scripts/server.js
 ~/.claude/timing/
 ├── .in-flight/              # 正在执行的调用（临时）
 │   └── <tool_use_id>.json
-└── <session-id>.jsonl       # 每行一条：{tool_name, duration_ms, ...}
+├── <session-id>.jsonl       # 每行一条：{tool_name, duration_ms, ...}
+└── .cc-switch-watch.pid     # cc-switch-watch 进程 ID
 ```
 
 磁盘占用约 200 字节/条，1000 次调用 ≈ 200KB，可忽略。不需要时直接 `rm -rf ~/.claude/timing/` 即可。
-
----
-
-## 与 cc-switch 配合使用
-
-cc-switch 切换配置时会覆盖 `settings.json`，导致 cc-perf 插件配置丢失。
-
-**自动恢复方案**：使用 `cc-switch-watch.sh` 监听配置变化，自动恢复 cc-perf。
-
-```bash
-# 方式 1：前台运行（测试用）
-./scripts/cc-switch-watch.sh
-
-# 方式 2：后台守护进程（轮询模式）
-./scripts/cc-switch-watch.sh --polling
-
-# 方式 3：安装为 LaunchAgent（开机自启）
-./scripts/cc-switch-watch.sh --install
-
-# 其他命令
-./scripts/cc-switch-watch.sh --status   # 查看状态
-./scripts/cc-switch-watch.sh --stop      # 停止守护进程
-./scripts/cc-switch-watch.sh --uninstall # 卸载 LaunchAgent
-```
 
 ---
 
@@ -131,22 +142,24 @@ cc-switch 切换配置时会覆盖 `settings.json`，导致 cc-perf 插件配置
 
 ```
 cc-perf/
-├── install.sh                    # 一键安装
-├── uninstall.sh                  # 一键卸载
+├── install.sh                    # cc-perf 核心安装
+├── uninstall.sh                  # 整体卸载（cc-perf + cc-switch-watch）
 ├── .claude-plugin/plugin.json    # 插件清单
 ├── hooks/
 │   ├── pre-tool-use.js           # 记录起始时间
 │   └── post-tool-use.js          # 计算耗时 + 输出
 ├── scripts/
 │   ├── server.js                 # Web 仪表板（零依赖 HTTP）
-│   ├── start-dashboard.sh        # 后台启动
-│   ├── stop-dashboard.sh         # 停止
-│   └── cc-switch-watch.sh        # 监听 cc-switch 配置变化
+│   ├── start-dashboard.sh        # 后台启动仪表板
+│   ├── stop-dashboard.sh         # 停止仪表板
+│   └── cc-switch-watch.sh        # 监听 cc-switch 配置变化（可选）
 ├── public/
 │   └── index.html                # 仪表板页面（Chart.js CDN）
 └── commands/
-    └── perf.md                   # /perf 斜杠命令（安装时复制到 ~/.claude/commands/）
+    └── perf.md                   # /perf 斜杠命令
 ```
+
+---
 
 ## License
 
