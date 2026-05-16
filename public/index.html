@@ -328,12 +328,8 @@ function renderGantt(data) {
   }
 
   const minStart = data.reduce((m, e) => Math.min(m, e.start), Infinity);
-  // 过滤掉异常值（持续时间 > 5 分钟且明显异常）
-  const filtered = data.filter(e => e.duration_ms < 600000 || e.duration_ms === data.reduce((m, x) => Math.max(m, x.duration_ms || 0), 0));
-  const display = filtered.length > 0 ? filtered : data;
-
   // 按 start 排序，分配 Y 索引
-  const sorted = [...display].sort((a, b) => a.start - b.start);
+  const sorted = [...data].sort((a, b) => a.start - b.start);
   const labels = sorted.map((e, i) => {
     const short = (e.tool_input_summary || '').substring(0, 30);
     return `${i+1}. ${e.tool_name}`;
@@ -394,7 +390,7 @@ function renderGantt(data) {
           grid: { color: '#21262d' },
         },
         y: {
-          ticks: { color: '#8b949e', font: { size: 9 }, stepSize: 1, maxTicksLimit: 50 },
+          ticks: { color: '#8b949e', font: { size: 9 }, stepSize: 1, maxTicksLimit: 200 },
           grid: { display: false },
         },
       },
