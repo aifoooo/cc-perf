@@ -108,7 +108,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-  .chart-box canvas { max-height: 400px; }
+  .chart-box canvas { max-height: 400px; min-height: 300px; }
   .chart-box.gantt-box {
     display: flex;
     flex-direction: column;
@@ -455,9 +455,13 @@ function renderGantt(data) {
     const totalSpan = sessionEnd - sessionStart || 1;
 
     // 动态计算轨道宽度：至少600px，每个任务至少4px bar宽度
-    const minBarPx = 4;
-    const minTrackPerTask = minBarPx * sorted.length;
-    const trackWidth = Math.max(600, totalSpan / 100, minTrackPerTask * 2);
+    // 基准：最小任务宽度 8px，第10分位任务至少 20px 宽
+    const minBarPx = 8;
+    const sortedByDur = [...sorted].map(e => e.duration_ms || 1).sort((a, b) => a - b);
+    const p10Dur = sortedByDur[Math.floor(sortedByDur.length * 0.1)] || sortedByDur[0];
+    const pxPerMsTarget = 20 / p10Dur;
+    const trackWidthByTask = totalSpan * pxPerMsTarget;
+    const trackWidth = Math.max(800, Math.min(trackWidthByTask, 4000));
     const pxPerMs = trackWidth / totalSpan;
     const labelWidth = 160;
 
