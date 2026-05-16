@@ -109,18 +109,17 @@
     letter-spacing: 0.5px;
   }
   .chart-box canvas { max-height: 400px; }
-  .gantt-wrapper {
-    position: relative;
-  }
-  .gantt-wrapper canvas {
-    height: auto !important;
-  }
-  .gantt-container {
+  .gantt-scroll-container {
     height: 70vh;
     overflow-y: auto;
+    overflow-x: hidden;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
+    border-radius: 6px;
+    background: #000;
+  }
+  .gantt-canvas-wrap {
+    position: relative;
+    width: 100%;
   }
   .slow-table {
     background: var(--surface);
@@ -208,8 +207,8 @@
 <div class="chart-row">
   <div class="chart-box">
     <h2>时间线（甘特图）</h2>
-    <div class="gantt-wrapper">
-      <div class="gantt-container">
+    <div class="gantt-scroll-container" id="gantt-scroll">
+      <div class="gantt-canvas-wrap">
         <canvas id="gantt-chart"></canvas>
       </div>
     </div>
@@ -379,9 +378,12 @@ function renderGantt(data) {
 
   if (ganttChart) ganttChart.destroy();
 
-  // 设置 canvas 高度 = 行数 * 行高，确保可滚动
+  // 设置 wrapper 高度让容器可以滚动
   const rowHeight = 24;
-  ctx.height = sorted.length * rowHeight;
+  const wrapper = document.querySelector('.gantt-canvas-wrap');
+  if (wrapper) {
+    wrapper.style.height = `${sorted.length * rowHeight}px`;
+  }
 
   ganttChart = new Chart(ctx, {
     type: 'bar',
