@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>cc-perf — Claude Code Performance Dashboard</title>
 <script src="chart.umd.min.js"></script>
-<script src="frappe-gantt.js"></script>
-<link rel="stylesheet" href="frappe-gantt.css">
 <style>
   :root {
     --bg: #0d1117;
@@ -129,43 +127,108 @@
     background: #0d1117;
     position: relative;
   }
-  /* Frappe Gantt 深色主题覆盖 */
-  .gantt-container svg.gantt {
-    display: block;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* 自定义甘特图样式 */
+  .custom-gantt {
+    min-width: 100%;
+    width: max-content;
   }
-  .gantt-container .grid-background { fill: #0d1117; }
-  .gantt-container .grid-header { fill: #161b22; stroke: #30363d; }
-  .gantt-container .grid-row { fill: #161b22; }
-  .gantt-container .grid-row:nth-child(even) { fill: #0d1117; }
-  .gantt-container .row-line { stroke: #30363d; }
-  .gantt-container .tick { stroke: #30363d; }
-  .gantt-container .today-highlight { fill: rgba(88,166,255,0.1); }
-  .gantt-container .arrow { stroke: #8b949e; }
-  .gantt-container .bar-label { fill: #fff; font-size: 11px; }
-  .gantt-container .bar-label.big { fill: #8b949e; }
-  .gantt-container .row-text,
-  .gantt-container .lower-text,
-  .gantt-container .upper-text { fill: #8b949e; font-size: 11px; }
-  .gantt-container .bar-invalid { fill: transparent !important; }
-  .gantt-container .handle { fill: #484f58; }
-  .gantt-container .popup-wrapper {
+  .custom-gantt .gantt-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .custom-gantt .gantt-header-row {
+    display: flex;
+    align-items: flex-end;
+    height: 32px;
+    border-bottom: 1px solid var(--border);
+    padding-left: 160px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg);
+  }
+  .custom-gantt .gantt-header-tick {
+    position: absolute;
+    font-size: 10px;
+    color: var(--text-dim);
+    transform: translateX(-50%);
+    white-space: nowrap;
+    bottom: 4px;
+  }
+  .custom-gantt .gantt-header-tick-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border);
+    opacity: 0.4;
+  }
+  .custom-gantt .gantt-task-row {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    border-bottom: 1px solid rgba(48,54,61,0.4);
+    position: relative;
+  }
+  .custom-gantt .gantt-task-row:hover {
+    background: rgba(88,166,255,0.04);
+  }
+  .custom-gantt .gantt-row-label {
+    width: 156px;
+    min-width: 156px;
+    padding: 0 12px 0 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--border);
+  }
+  .custom-gantt .gantt-task-row:hover .gantt-row-label {
+    background: #1a2332;
+  }
+  .custom-gantt .gantt-row-track {
+    flex: 1;
+    height: 100%;
+    position: relative;
+  }
+  .custom-gantt .gantt-bar {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    min-width: 4px;
+    opacity: 0.85;
+  }
+  .custom-gantt .gantt-bar:hover {
+    opacity: 1;
+    z-index: 3;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.3);
+  }
+  .custom-gantt .gantt-tooltip {
+    display: none;
+    position: fixed;
     background: #161b22;
     border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
     color: var(--text);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    font-size: 12px;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    max-width: 300px;
   }
-  .gantt-container .popup-wrapper .title {
-    border-bottom-color: #58a6ff;
-  }
-  .gantt-container .popup-wrapper .subtitle {
-    color: #c9d1d9;
-  }
-  .gantt-container .popup-wrapper .pointer {
-    border-top-color: #161b22;
-  }
-  /* Bar 颜色通过 JS 动态设置 (setAttribute fill) */
   .slow-table {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -306,7 +369,6 @@ function toolBorder(tool) { return TOOL_BORDER_COLORS[tool] || DEFAULT_BORDER; }
 let currentSessionId = '';
 let currentData = [];
 let autoRefresh = true;
-let ganttChart = null;
 let donutChart = null;
 
 // === 格式化 ===
@@ -383,122 +445,101 @@ function renderGantt(data) {
 
   if (data.length === 0) {
     container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">暂无数据</div>';
-    ganttChart = null;
     return;
   }
 
   try {
-    // 按 start 排序
     const sorted = [...data].sort((a, b) => a.start - b.start);
+    const sessionStart = Math.min(...sorted.map(e => e.start));
+    const sessionEnd = Math.max(...sorted.map(e => e.end));
+    const totalSpan = sessionEnd - sessionStart || 1;
 
-    // 计算时间范围，选择合适的视图模式
-    const minTime = Math.min(...sorted.map(e => e.start));
-    const maxTime = Math.max(...sorted.map(e => e.end));
-    const timeRange = maxTime - minTime;
+    // 动态计算轨道宽度：至少600px，每个任务至少4px bar宽度
+    const minBarPx = 4;
+    const minTrackPerTask = minBarPx * sorted.length;
+    const trackWidth = Math.max(600, totalSpan / 100, minTrackPerTask * 2);
+    const pxPerMs = trackWidth / totalSpan;
+    const labelWidth = 160;
 
-    // 根据时间范围选择视图模式
-    let viewMode = 'Hour';
-    if (timeRange > 24 * 60 * 60 * 1000) viewMode = 'Day';
-    if (timeRange > 7 * 24 * 60 * 60 * 1000) viewMode = 'Week';
+    // 生成时间刻度（5个等分点）
+    const tickCount = 5;
+    const ticks = [];
+    for (let i = 0; i <= tickCount; i++) {
+      const offsetMs = (totalSpan / tickCount) * i;
+      const tickTime = new Date(sessionStart + offsetMs);
+      ticks.push({
+        label: tickTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        left: (offsetMs * pxPerMs).toFixed(1),
+      });
+    }
 
-    // 转换为 Frappe Gantt 格式
-    const tasks = sorted.map((e, i) => {
-      const startDate = new Date(e.start);
-      const endDate = new Date(e.end);
-      // 格式化为 YYYY-MM-DD HH:mm
-      const formatDate = (d) => {
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-      };
+    // 构建 HTML
+    let html = `<div class="custom-gantt" style="width:${labelWidth + trackWidth}px;min-width:100%;">`;
+    html += `<div class="gantt-header-row" style="position:relative;width:${labelWidth + trackWidth}px;">`;
+    ticks.forEach(t => {
+      html += `<div class="gantt-header-tick" style="left:${labelWidth + parseFloat(t.left)}px;">${t.label}</div>`;
+      html += `<div class="gantt-header-tick-line" style="left:${labelWidth + parseFloat(t.left)}px;"></div>`;
+    });
+    html += `</div>`;
+    html += `<div class="gantt-timeline">`;
 
-      const summary = (e.tool_input_summary || '').substring(0, 40);
+    sorted.forEach((e, i) => {
+      const left = ((e.start - sessionStart) * pxPerMs).toFixed(1);
+      const width = Math.max(minBarPx, e.duration_ms * pxPerMs).toFixed(1);
       const color = toolColor(e.tool_name);
+      const summary = (e.tool_input_summary || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const duration = formatDuration(e.duration_ms);
 
-      return {
-        id: `task-${i}`,
-        name: `${i + 1}. ${e.tool_name}`,
-        start: formatDate(startDate),
-        end: formatDate(endDate),
-        progress: 100,
-        custom_class: `bar-${e.tool_name.toLowerCase().replace(/[^a-z]/g, '')}`,
-        _color: color,
-        _duration: formatDuration(e.duration_ms),
-        _summary: summary,
-      };
+      html += `<div class="gantt-task-row" style="width:${labelWidth + trackWidth}px;">`;
+      html += `<span class="gantt-row-label" title="${e.tool_name}">${i + 1}. ${e.tool_name}</span>`;
+      html += `<div class="gantt-row-track">`;
+      html += `<div class="gantt-bar"
+          style="left:${left}px;width:${width}px;background:${color};"
+          data-tool="${e.tool_name}"
+          data-duration="${duration}"
+          data-summary="${summary}">`;
+      html += `</div>`;
+      html += `</div>`;
+      html += `</div>`;
     });
 
-    // 清空容器
-    container.innerHTML = '';
+    html += `</div></div>`;
+    container.innerHTML = html;
 
-    // 创建 Frappe Gantt
-    if (typeof Gantt !== 'undefined') {
-      ganttChart = new Gantt(container, tasks, {
-        view_mode: viewMode,
-        header_height: 50,
-        column_width: 30,
-        step: 24,
-        bar_height: 28,
-        bar_corner_radius: 3,
-        arrow_curve: 0,
-        padding: 18,
-        view_modes: ['Hour', 'Half Day', 'Day', 'Week'],
-        date_format: 'YYYY-MM-DD HH:mm',
-        popup: function(task) {
-          return `<div style="padding:8px 12px;">
-            <strong style="color:#58a6ff;">${task.name}</strong>
-            <div style="margin-top:4px;color:#8b949e;font-size:11px;">
-              耗时: ${task._duration || '--'}
-            </div>
-            <div style="color:#6e7681;font-size:10px;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">
-              ${task._summary || ''}
-            </div>
-          </div>`;
-        },
-        on_click: function(task) {
-          console.log('Task:', task);
-        },
+    // 添加 tooltip 交互
+    const tooltip = document.getElementById('gantt-tooltip') || createTooltip();
+    container.querySelectorAll('.gantt-bar').forEach(bar => {
+      bar.addEventListener('mouseenter', (e) => {
+        tooltip.innerHTML = `<strong style="color:#58a6ff;">${bar.dataset.tool}</strong>
+          <span style="margin-left:8px;color:#8b949e;">${bar.dataset.duration}</span>
+          ${bar.dataset.summary ? `<div style="margin-top:4px;color:#6e7681;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${bar.dataset.summary}</div>` : ''}`;
+        tooltip.style.display = 'block';
+        updateTooltipPos(e, tooltip);
       });
-
-      // 渲染后修复 SVG 尺寸和颜色（等待动画完成后执行）
-      const fixGanttStyles = () => {
-        const svg = container.querySelector('svg.gantt');
-        if (!svg) return;
-        // 调整 SVG 尺寸以支持横向滚动
-        const svgWidth = svg.getAttribute('width');
-        if (svgWidth) {
-          svg.style.width = svgWidth + 'px';
-          svg.style.minWidth = svgWidth + 'px';
-          svg.style.maxWidth = 'none';
-        }
-        // 用 setAttribute 设置 bar 颜色（SVG 属性，优先级最高的样式）
-        const allBarGroups = container.querySelectorAll('.bar-group');
-        allBarGroups.forEach((group, i) => {
-          const bar = group.querySelector('.bar');
-          const progress = group.querySelector('.bar-progress');
-          if (bar && tasks[i] && tasks[i]._color) {
-            bar.setAttribute('fill', tasks[i]._color);
-            bar.style.fill = tasks[i]._color;
-            if (progress) {
-              const rgba = tasks[i]._color.replace('0.85', '0.35');
-              progress.setAttribute('fill', rgba);
-              progress.style.fill = rgba;
-            }
-          }
-        });
-      };
-
-      // 等待 Frappe Gantt 的 SVG 动画完成（0.4s 动画 + 0.1s 延迟）
-      fixGanttStyles();
-      setTimeout(fixGanttStyles, 100);
-      setTimeout(fixGanttStyles, 600);
-
-    } else {
-      container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">Gantt 库加载失败</div>';
-    }
+      bar.addEventListener('mousemove', (e) => updateTooltipPos(e, tooltip));
+      bar.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    });
   } catch (err) {
     console.error('renderGantt error:', err);
     container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">甘特图渲染错误: ${err.message}</div>`;
   }
+}
+
+function createTooltip() {
+  const el = document.createElement('div');
+  el.id = 'gantt-tooltip';
+  el.className = 'gantt-tooltip';
+  document.body.appendChild(el);
+  return el;
+}
+
+function updateTooltipPos(e, tooltip) {
+  let x = e.clientX + 12;
+  let y = e.clientY - 10;
+  if (x + tooltip.offsetWidth > window.innerWidth) x = e.clientX - tooltip.offsetWidth - 12;
+  if (y + tooltip.offsetHeight > window.innerHeight) y = e.clientY - tooltip.offsetHeight - 10;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
 }
 
 function renderDonut(data) {
