@@ -498,18 +498,25 @@ async function refresh(forceFull = false) {
   const select = document.getElementById('session-select');
   const selectedId = select.value;
 
-  if (!selectedId) {
-    // 自动加载会话列表并选最新
-    await loadSessions();
-    const newSelected = document.getElementById('session-select').value;
-    if (!newSelected) {
-      renderAll([]);
-      return;
-    }
+  // 始终刷新会话列表（检测新增/删除的会话）
+  const prevSessions = select.options.length;
+  await loadSessions();
+
+  // 如果会话列表变了（新增会话），自动选最新的
+  if (select.options.length !== prevSessions && !selectedId) {
+    select.value = select.options[1]?.value || '';
+  }
+
+  const newSelected = select.value;
+
+  if (!newSelected) {
+    renderAll([]);
+    return;
+  }
+
+  // 检测会话是否切换
+  if (newSelected !== currentSessionId || forceFull) {
     currentSessionId = newSelected;
-  } else if (selectedId !== currentSessionId || forceFull) {
-    // 切换了会话或手动强制刷新，全量加载
-    currentSessionId = selectedId;
     const data = await loadSessionData(currentSessionId);
     renderAll(data);
     return;
