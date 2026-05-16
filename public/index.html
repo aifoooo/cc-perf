@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cc-perf — Claude Code Performance Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --danger: #f85149;
+    --success: #3fb950;
+    --warning: #d2991d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  button {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #1f2937; }
+  button.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card__label {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .card__value {
+    font-size: 28px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .chart-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+  }
+  .chart-box h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .chart-box canvas { max-height: 400px; }
+  .slow-table {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .slow-table h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  tr:hover { background: rgba(88, 166, 255, 0.04); }
+  .tool-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .summary-cell {
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty-state p { margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>cc-perf</h1>
+  <div class="controls">
+    <select id="session-select">
+      <option value="">-- 选择会话 --</option>
+    </select>
+    <button id="refresh-btn" title="刷新数据">↻</button>
+    <button id="auto-refresh-btn" class="active" title="自动刷新">⟳ 自动</button>
+  </div>
+</header>
+
+<div class="cards">
+  <div class="card">
+    <div class="card__label">总耗时</div>
+    <div class="card__value" id="total-time">--</div>
+  </div>
+  <div class="card">
+    <div class="card__label">调用次数</div>
+    <div class="card__value" id="total-calls">--</div>
+  </div>
+  <div class="card">
+    <div class="card__label">平均耗时</div>
+    <div class="card__value" id="avg-duration">--</div>
+  </div>
+  <div class="card">
+    <div class="card__label">最慢操作</div>
+    <div class="card__value" id="max-duration" style="font-size:20px">--</div>
+  </div>
+</div>
+
+<div class="chart-row">
+  <div class="chart-box">
+    <h2>时间线（甘特图）</h2>
+    <canvas id="gantt-chart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h2>耗时分布</h2>
+    <canvas id="donut-chart"></canvas>
+  </div>
+</div>
+
+<div class="slow-table">
+  <h2>最慢 Top 15 步</h2>
+  <div id="slow-table-content">
+    <table>
+      <thead><tr><th>#</th><th>工具</th><th>耗时</th><th>操作</th></tr></thead>
+      <tbody id="slow-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="empty-placeholder" class="empty-state" style="display:none">
+  <p>暂无数据 — 执行一些操作后刷新即可</p>
+</div>
+
+<script>
+// === 颜色方案（按工具类型） ===
+const TOOL_COLORS = {
+  Bash: 'rgba(255,99,132,0.85)',
+  Read: 'rgba(54,162,235,0.85)',
+  Write: 'rgba(255,205,86,0.85)',
+  Edit: 'rgba(75,192,192,0.85)',
+  Agent: 'rgba(153,102,255,0.85)',
+  Grep: 'rgba(255,159,64,0.85)',
+  Glob: 'rgba(201,203,207,0.85)',
+  WebFetch: 'rgba(123,200,164,0.85)',
+  WebSearch: 'rgba(232,160,191,0.85)',
+  TaskOutput: 'rgba(148,148,148,0.85)',
+  Skill: 'rgba(100,200,200,0.85)',
+};
+const DEFAULT_COLOR = 'rgba(168,168,168,0.85)';
+
+const TOOL_BORDER_COLORS = {};
+for (const [k, v] of Object.entries(TOOL_COLORS)) {
+  TOOL_BORDER_COLORS[k] = v.replace('0.85', '1');
+}
+const DEFAULT_BORDER = 'rgba(168,168,168,1)';
+
+function toolColor(tool) { return TOOL_COLORS[tool] || DEFAULT_COLOR; }
+function toolBorder(tool) { return TOOL_BORDER_COLORS[tool] || DEFAULT_BORDER; }
+
+// === 状态 ===
+let currentSessionId = '';
+let currentData = [];
+let autoRefresh = true;
+let ganttChart = null;
+let donutChart = null;
+
+// === 格式化 ===
+function formatDuration(ms) {
+  if (!ms && ms !== 0) return '--';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60000);
+  const s = Math.round((ms % 60000) / 1000);
+  return `${m}m${s}s`;
+}
+
+// === API ===
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  return res.json();
+}
+
+// === 加载会话列表 ===
+async function loadSessions() {
+  const sessions = await fetchJSON('/api/sessions');
+  const select = document.getElementById('session-select');
+  const current = select.value;
+  select.innerHTML = '<option value="">-- 选择会话 --</option>';
+  for (const s of sessions) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    const date = new Date(s.mtime).toLocaleString('zh-CN');
+    opt.textContent = `${s.id.substring(0,12)}… — ${s.entry_count}次调用, ${formatDuration(s.total_ms)} — ${date}`;
+    select.appendChild(opt);
+  }
+  // 保持选中或自动选最新
+  if (current && sessions.find(s => s.id === current)) {
+    select.value = current;
+  } else if (sessions.length > 0 && !currentSessionId) {
+    select.value = sessions[0].id;
+    currentSessionId = sessions[0].id;
+  }
+  return sessions;
+}
+
+// === 加载会话数据 ===
+async function loadSessionData(sessionId, since) {
+  let url = `/api/session/${sessionId}`;
+  if (since) url += `/since/${since}`;
+  return fetchJSON(url);
+}
+
+// === 渲染 ===
+function renderSummary(data) {
+  const totalMs = data.reduce((s, e) => s + (e.duration_ms || 0), 0);
+  const totalCalls = data.length;
+  const avgMs = totalCalls > 0 ? Math.round(totalMs / totalCalls) : 0;
+  let maxEntry = null;
+  let maxMs = 0;
+  for (const e of data) {
+    if (e.duration_ms > maxMs) { maxMs = e.duration_ms; maxEntry = e; }
+  }
+
+  document.getElementById('total-time').textContent = formatDuration(totalMs);
+  document.getElementById('total-calls').textContent = totalCalls;
+  document.getElementById('avg-duration').textContent = formatDuration(avgMs);
+  if (maxEntry) {
+    document.getElementById('max-duration').innerHTML =
+      `${formatDuration(maxMs)} <span style="font-size:13px;color:var(--text-dim);margin-left:4px;">${maxEntry.tool_name}</span>`;
+  } else {
+    document.getElementById('max-duration').textContent = '--';
+  }
+}
+
+function renderGantt(data) {
+  const ctx = document.getElementById('gantt-chart');
+  if (!ctx) return;
+
+  if (data.length === 0) {
+    if (ganttChart) { ganttChart.destroy(); ganttChart = null; }
+    return;
+  }
+
+  const minStart = data.reduce((m, e) => Math.min(m, e.start), Infinity);
+  // 过滤掉异常值（持续时间 > 5 分钟且明显异常）
+  const filtered = data.filter(e => e.duration_ms < 600000 || e.duration_ms === data.reduce((m, x) => Math.max(m, x.duration_ms || 0), 0));
+  const display = filtered.length > 0 ? filtered : data;
+
+  // 按 start 排序，分配 Y 索引
+  const sorted = [...display].sort((a, b) => a.start - b.start);
+  const labels = sorted.map((e, i) => {
+    const short = (e.tool_input_summary || '').substring(0, 30);
+    return `${i+1}. ${e.tool_name}`;
+  });
+
+  const datasets = [];
+  // 按工具类型分组，以便不同颜色
+  const byTool = {};
+  sorted.forEach(e => {
+    if (!byTool[e.tool_name]) byTool[e.tool_name] = [];
+    byTool[e.tool_name].push(e);
+  });
+
+  for (const [tool, entries] of Object.entries(byTool)) {
+    const indices = entries.map(e => sorted.indexOf(e));
+    datasets.push({
+      label: tool,
+      data: entries.map(e => ({
+        x: [(e.start - minStart) / 1000, (e.end - minStart) / 1000],
+        y: sorted.indexOf(e),
+      })),
+      backgroundColor: toolColor(tool),
+      borderColor: toolBorder(tool),
+      borderWidth: 1,
+      borderSkipped: false,
+      borderRadius: 3,
+      barPercentage: 0.8,
+    });
+  }
+
+  if (ganttChart) ganttChart.destroy();
+
+  ganttChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets,
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 }, padding: 8 } },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const d = sorted[ctx.dataIndex];
+              return `${d.tool_name}: ${formatDuration(d.duration_ms)} — ${d.tool_input_summary || ''}`;
+            }
+          }
+        },
+      },
+      scales: {
+        x: {
+          title: { text: '相对时间（秒）', display: true, color: '#8b949e' },
+          ticks: { color: '#8b949e', font: { size: 10 } },
+          grid: { color: '#21262d' },
+        },
+        y: {
+          ticks: { color: '#8b949e', font: { size: 9 }, stepSize: 1, maxTicksLimit: 50 },
+          grid: { display: false },
+        },
+      },
+    },
+  });
+}
+
+function renderDonut(data) {
+  const ctx = document.getElementById('donut-chart');
+  if (!ctx) return;
+
+  if (data.length === 0) {
+    if (donutChart) { donutChart.destroy(); donutChart = null; }
+    return;
+  }
+
+  const byTool = {};
+  for (const e of data) {
+    if (!byTool[e.tool_name]) byTool[e.tool_name] = 0;
+    byTool[e.tool_name] += e.duration_ms || 0;
+  }
+
+  const sorted = Object.entries(byTool).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const values = sorted.map(([, v]) => v);
+  const colors = sorted.map(([k]) => toolColor(k));
+
+  if (donutChart) donutChart.destroy();
+
+  donutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderColor: '#161b22',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#8b949e', padding: 12, font: { size: 11 }, boxWidth: 10 },
+        },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const total = values.reduce((s, v) => s + v, 0);
+              const pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+              return `${ctx.label}: ${formatDuration(ctx.raw)} (${pct}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderSlowTable(data) {
+  const tbody = document.getElementById('slow-tbody');
+  const sorted = [...data].sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0));
+  const top = sorted.slice(0, 15);
+
+  tbody.innerHTML = top.map((e, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><span class="tool-tag" style="background:${toolColor(e.tool_name)};color:#000">${e.tool_name}</span></td>
+      <td><strong>${formatDuration(e.duration_ms)}</strong></td>
+      <td class="summary-cell" title="${(e.tool_input_summary || '').replace(/"/g, '&quot;')}">${e.tool_input_summary || '--'}</td>
+    </tr>
+  `).join('');
+
+  if (top.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:20px">暂无数据</td></tr>';
+  }
+}
+
+function renderAll(data) {
+  currentData = data;
+
+  if (data.length === 0) {
+    document.getElementById('empty-placeholder').style.display = 'block';
+    document.querySelector('.cards').style.opacity = '0.5';
+  } else {
+    document.getElementById('empty-placeholder').style.display = 'none';
+    document.querySelector('.cards').style.opacity = '1';
+  }
+
+  renderSummary(data);
+  renderGantt(data);
+  renderDonut(data);
+  renderSlowTable(data);
+}
+
+// === 主流程 ===
+async function refresh(forceFull = false) {
+  const select = document.getElementById('session-select');
+  const selectedId = select.value;
+
+  if (!selectedId) {
+    // 自动加载会话列表并选最新
+    await loadSessions();
+    const newSelected = document.getElementById('session-select').value;
+    if (!newSelected) {
+      renderAll([]);
+      return;
+    }
+    currentSessionId = newSelected;
+  } else if (selectedId !== currentSessionId || forceFull) {
+    // 切换了会话或手动强制刷新，全量加载
+    currentSessionId = selectedId;
+    const data = await loadSessionData(currentSessionId);
+    renderAll(data);
+    return;
+  }
+
+  // 增量更新
+  const lastEnd = currentData.length > 0
+    ? Math.max(...currentData.map(e => e.end))
+    : 0;
+  const newEntries = await loadSessionData(currentSessionId, lastEnd);
+
+  if (newEntries.length > 0) {
+    const merged = [...currentData, ...newEntries];
+    renderAll(merged);
+  } else if (currentData.length === 0) {
+    const data = await loadSessionData(currentSessionId);
+    renderAll(data);
+  }
+  // else: 无新数据，不重绘
+}
+
+// === 事件绑定 ===
+document.getElementById('session-select').addEventListener('change', () => {
+  refresh();
+});
+
+document.getElementById('refresh-btn').addEventListener('click', () => refresh(true));
+
+document.getElementById('auto-refresh-btn').addEventListener('click', function() {
+  autoRefresh = !autoRefresh;
+  this.classList.toggle('active', autoRefresh);
+  this.textContent = autoRefresh ? '⟳ 自动' : '⟳ 手动';
+});
+
+// === 自动刷新 ===
+setInterval(() => {
+  if (autoRefresh) refresh();
+}, 2000);
+
+// === 初始加载 ===
+refresh();
+</script>
+</body>
+</html>

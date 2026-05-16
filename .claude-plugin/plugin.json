@@ -1,0 +1,9 @@
+{
+  "name": "cc-perf",
+  "version": "1.0.0",
+  "description": "Claude Code 性能监控插件 — 记录每一步工具调用耗时，提供 Web 可视化面板定位瓶颈",
+  "author": { "name": "Sam Lu" },
+  "license": "MIT",
+  "keywords": ["performance", "timing", "monitoring", "dashboard"],
+  "commands": ["./commands/perf.md"]
+}
