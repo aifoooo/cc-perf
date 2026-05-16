@@ -103,6 +103,30 @@ node scripts/server.js
 
 ---
 
+## 与 cc-switch 配合使用
+
+cc-switch 切换配置时会覆盖 `settings.json`，导致 cc-perf 插件配置丢失。
+
+**自动恢复方案**：使用 `cc-switch-watch.sh` 监听配置变化，自动恢复 cc-perf。
+
+```bash
+# 方式 1：前台运行（测试用）
+./scripts/cc-switch-watch.sh
+
+# 方式 2：后台守护进程（轮询模式）
+./scripts/cc-switch-watch.sh --polling
+
+# 方式 3：安装为 LaunchAgent（开机自启）
+./scripts/cc-switch-watch.sh --install
+
+# 其他命令
+./scripts/cc-switch-watch.sh --status   # 查看状态
+./scripts/cc-switch-watch.sh --stop      # 停止守护进程
+./scripts/cc-switch-watch.sh --uninstall # 卸载 LaunchAgent
+```
+
+---
+
 ## 项目结构
 
 ```
@@ -116,7 +140,8 @@ cc-perf/
 ├── scripts/
 │   ├── server.js                 # Web 仪表板（零依赖 HTTP）
 │   ├── start-dashboard.sh        # 后台启动
-│   └── stop-dashboard.sh         # 停止
+│   ├── stop-dashboard.sh         # 停止
+│   └── cc-switch-watch.sh        # 监听 cc-switch 配置变化
 ├── public/
 │   └── index.html                # 仪表板页面（Chart.js CDN）
 └── commands/
