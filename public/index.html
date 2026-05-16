@@ -129,61 +129,43 @@
     background: #0d1117;
     position: relative;
   }
-  /* Frappe Gantt SVG 样式 - 使用 !important 强制覆盖 */
+  /* Frappe Gantt 深色主题覆盖 */
   .gantt-container svg.gantt {
     display: block;
-    max-width: none !important;
-    min-width: auto !important;
-  }
-  .gantt-container .gantt {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
-  .gantt-container .gantt {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-  .gantt-container .grid-background {
-    fill: #0d1117;
-  }
-  .gantt-container .grid-header {
-    fill: #161b22;
-  }
-  .gantt-container .grid-row {
-    fill: #161b22;
-  }
-  .gantt-container .grid-row:nth-child(even) {
-    fill: #0d1117;
-  }
-  .gantt-container .row-line {
-    stroke: #30363d;
-    stroke-width: 1;
-  }
-  .gantt-container .tick {
-    stroke: #30363d;
-    stroke-width: 0.5;
-  }
+  .gantt-container .grid-background { fill: #0d1117; }
+  .gantt-container .grid-header { fill: #161b22; stroke: #30363d; }
+  .gantt-container .grid-row { fill: #161b22; }
+  .gantt-container .grid-row:nth-child(even) { fill: #0d1117; }
+  .gantt-container .row-line { stroke: #30363d; }
+  .gantt-container .tick { stroke: #30363d; }
+  .gantt-container .today-highlight { fill: rgba(88,166,255,0.1); }
+  .gantt-container .arrow { stroke: #8b949e; }
+  .gantt-container .bar-label { fill: #fff; font-size: 11px; }
+  .gantt-container .bar-label.big { fill: #8b949e; }
   .gantt-container .row-text,
   .gantt-container .lower-text,
-  .gantt-container .upper-text {
-    fill: #8b949e;
-    font-size: 11px;
-  }
-  .gantt-container .bar {
-    rx: 3;
-    ry: 3;
-    shape-rendering: crispEdges;
-  }
-  .gantt-container .bar-invalid {
-    fill: transparent !important;
-  }
+  .gantt-container .upper-text { fill: #8b949e; font-size: 11px; }
+  .gantt-container .bar-invalid { fill: transparent !important; }
+  .gantt-container .handle { fill: #484f58; }
   .gantt-container .popup-wrapper {
     background: #161b22;
     border: 1px solid var(--border);
     color: var(--text);
-    font-size: 12px;
-    padding: 8px 12px;
     border-radius: 4px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }
+  .gantt-container .popup-wrapper .title {
+    border-bottom-color: #58a6ff;
+  }
+  .gantt-container .popup-wrapper .subtitle {
+    color: #c9d1d9;
+  }
+  .gantt-container .popup-wrapper .pointer {
+    border-top-color: #161b22;
+  }
+  /* Bar 颜色通过 JS 动态设置 (setAttribute fill) */
   .slow-table {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -477,23 +459,38 @@ function renderGantt(data) {
         },
       });
 
-      // 渲染后修复 SVG 尺寸和颜色
-      setTimeout(() => {
-        const svg = container.querySelector('svg');
-        if (svg) {
-          // 保持 SVG 宽度，但限制在容器内可滚动
-          svg.style.minWidth = svg.getAttribute('width') || '800px';
-          svg.style.width = 'auto';
+      // 渲染后修复 SVG 尺寸和颜色（等待动画完成后执行）
+      const fixGanttStyles = () => {
+        const svg = container.querySelector('svg.gantt');
+        if (!svg) return;
+        // 调整 SVG 尺寸以支持横向滚动
+        const svgWidth = svg.getAttribute('width');
+        if (svgWidth) {
+          svg.style.width = svgWidth + 'px';
+          svg.style.minWidth = svgWidth + 'px';
           svg.style.maxWidth = 'none';
         }
-        // 设置 bar 颜色
-        const bars = container.querySelectorAll('.bar');
-        bars.forEach((bar, i) => {
-          if (tasks[i] && tasks[i]._color) {
+        // 用 setAttribute 设置 bar 颜色（SVG 属性，优先级最高的样式）
+        const allBarGroups = container.querySelectorAll('.bar-group');
+        allBarGroups.forEach((group, i) => {
+          const bar = group.querySelector('.bar');
+          const progress = group.querySelector('.bar-progress');
+          if (bar && tasks[i] && tasks[i]._color) {
+            bar.setAttribute('fill', tasks[i]._color);
             bar.style.fill = tasks[i]._color;
+            if (progress) {
+              const rgba = tasks[i]._color.replace('0.85', '0.35');
+              progress.setAttribute('fill', rgba);
+              progress.style.fill = rgba;
+            }
           }
         });
-      }, 50);
+      };
+
+      // 等待 Frappe Gantt 的 SVG 动画完成（0.4s 动画 + 0.1s 延迟）
+      fixGanttStyles();
+      setTimeout(fixGanttStyles, 100);
+      setTimeout(fixGanttStyles, 600);
 
     } else {
       container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">Gantt 库加载失败</div>';
