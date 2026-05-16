@@ -109,12 +109,18 @@
     letter-spacing: 0.5px;
   }
   .chart-box canvas { max-height: 400px; }
-  .gantt-container {
-    overflow-y: auto;
-    max-height: 70vh;
+  .gantt-wrapper {
+    position: relative;
   }
-  .gantt-container canvas {
-    max-height: none !important;
+  .gantt-wrapper canvas {
+    height: auto !important;
+  }
+  .gantt-container {
+    height: 70vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
   }
   .slow-table {
     background: var(--surface);
@@ -202,8 +208,10 @@
 <div class="chart-row">
   <div class="chart-box">
     <h2>时间线（甘特图）</h2>
-    <div class="gantt-container">
-      <canvas id="gantt-chart"></canvas>
+    <div class="gantt-wrapper">
+      <div class="gantt-container">
+        <canvas id="gantt-chart"></canvas>
+      </div>
     </div>
   </div>
   <div class="chart-box">
