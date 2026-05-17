@@ -109,6 +109,84 @@
     letter-spacing: 0.5px;
   }
   .chart-box canvas { max-height: 400px; min-height: 300px; }
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .chart-header h2 {
+    margin-bottom: 0;
+  }
+  .view-switch {
+    display: flex;
+    gap: 4px;
+  }
+  .view-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .view-btn:hover {
+    background: rgba(88,166,255,0.1);
+    color: var(--text);
+  }
+  .view-btn.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+  }
+  /* 火焰图样式 */
+  .flame-chart {
+    min-width: 100%;
+  }
+  .flame-row {
+    display: flex;
+    align-items: stretch;
+    height: 28px;
+    margin-bottom: 2px;
+  }
+  .flame-bar {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    color: #000;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: filter 0.15s;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .flame-bar:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
+  }
+  .flame-bar span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .flame-tooltip {
+    position: fixed;
+    background: #161b22;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 12px;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    max-width: 320px;
+    display: none;
+  }
   .slow-table {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -193,9 +271,16 @@
 </div>
 
 <div class="chart-row">
-  <div class="chart-box">
-    <h2>帕累托图（瓶颈定位）</h2>
-    <canvas id="pareto-chart"></canvas>
+  <div class="chart-box" id="main-chart-box">
+    <div class="chart-header">
+      <h2 id="main-chart-title">帕累托图（瓶颈定位）</h2>
+      <div class="view-switch">
+        <button class="view-btn active" data-view="pareto">帕累托</button>
+        <button class="view-btn" data-view="waterfall">瀑布图</button>
+        <button class="view-btn" data-view="flame">火焰图</button>
+      </div>
+    </div>
+    <div id="main-chart" style="min-height:300px;"></div>
   </div>
   <div class="chart-box">
     <h2>耗时分布</h2>
@@ -205,7 +290,7 @@
 
 <div class="chart-row" style="grid-template-columns: 1fr;">
   <div class="chart-box">
-    <h2>最慢操作（水平条形图）</h2>
+    <h2>最慢操作 Top 15</h2>
     <canvas id="bar-chart"></canvas>
   </div>
 </div>
@@ -324,125 +409,308 @@ function renderSummary(data) {
   }
 }
 
-// === 帕累托图：快速定位瓶颈（80/20法则） ===
-let paretoChart = null;
+// === 主图表（支持多视图切换） ===
+let mainChart = null;
 let barChart = null;
+let currentView = 'pareto';
 
-function renderPareto(data) {
-  const ctx = document.getElementById('pareto-chart');
-  if (!ctx) return;
+const VIEW_TITLES = {
+  pareto: '帕累托图（瓶颈定位）',
+  waterfall: '瀑布图（时间序列）',
+  flame: '火焰图（耗时占比）',
+};
+
+function renderMainChart(data, view = currentView) {
+  currentView = view;
+
+  // 更新标题和按钮状态
+  document.getElementById('main-chart-title').textContent = VIEW_TITLES[view];
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+
+  // 根据视图类型调用不同渲染函数
+  switch (view) {
+    case 'pareto': renderParetoView(data); break;
+    case 'waterfall': renderWaterfallView(data); break;
+    case 'flame': renderFlameView(data); break;
+  }
+}
+
+// === 帕累托图：80/20法则定位瓶颈 ===
+function renderParetoView(data) {
+  const container = document.getElementById('main-chart');
+  if (!container) return;
+
+  // 清除火焰图的 HTML 内容
+  container.innerHTML = '<canvas id="pareto-canvas"></canvas>';
+  const ctx = document.getElementById('pareto-canvas');
 
   if (data.length === 0) {
-    if (paretoChart) { paretoChart.destroy(); paretoChart = null; }
+    if (mainChart) { mainChart.destroy(); mainChart = null; }
     return;
   }
 
-  try {
-    // 按工具聚合耗时
-    const byTool = {};
-    for (const e of data) {
-      if (!byTool[e.tool_name]) byTool[e.tool_name] = 0;
-      byTool[e.tool_name] += e.duration_ms || 0;
-    }
-
-    // 按耗时降序排序
-    const sorted = Object.entries(byTool).sort((a, b) => b[1] - a[1]);
-    const labels = sorted.map(([k]) => k);
-    const values = sorted.map(([, v]) => v);
-    const total = values.reduce((s, v) => s + v, 0);
-
-    // 计算累计百分比
-    let cumPct = 0;
-    const cumulative = values.map(v => {
-      cumPct += (v / total) * 100;
-      return cumPct;
-    });
-
-    const colors = sorted.map(([k]) => toolColor(k));
-
-    if (paretoChart) paretoChart.destroy();
-
-    paretoChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          {
-            type: 'bar',
-            label: '耗时',
-            data: values,
-            backgroundColor: colors,
-            borderColor: '#161b22',
-            borderWidth: 1,
-            yAxisID: 'y',
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: '累计%',
-            data: cumulative,
-            borderColor: '#f85149',
-            backgroundColor: 'rgba(248,81,73,0.1)',
-            borderWidth: 2,
-            pointRadius: 4,
-            pointBackgroundColor: '#f85149',
-            tension: 0.1,
-            yAxisID: 'y1',
-            order: 1,
-          }
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: {
-            position: 'top',
-            labels: { color: '#8b949e', padding: 16, font: { size: 11 } },
-          },
-          tooltip: {
-            callbacks: {
-              label(ctx) {
-                if (ctx.dataset.label === '耗时') {
-                  const pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
-                  return `${ctx.label}: ${formatDuration(ctx.raw)} (${pct}%)`;
-                }
-                return `累计: ${ctx.raw.toFixed(1)}%`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            ticks: { color: '#8b949e', font: { size: 10 } },
-            grid: { color: 'rgba(48,54,61,0.3)' },
-          },
-          y: {
-            type: 'linear',
-            position: 'left',
-            title: { display: true, text: '耗时', color: '#8b949e' },
-            ticks: {
-              color: '#8b949e',
-              callback: v => formatDuration(v),
-            },
-            grid: { color: 'rgba(48,54,61,0.3)' },
-          },
-          y1: {
-            type: 'linear',
-            position: 'right',
-            min: 0,
-            max: 100,
-            title: { display: true, text: '累计%', color: '#f85149' },
-            ticks: { color: '#f85149', callback: v => v + '%' },
-            grid: { drawOnChartArea: false },
-          },
-        },
-      },
-    });
-  } catch (err) {
-    console.error('renderPareto error:', err);
+  // 按工具聚合耗时
+  const byTool = {};
+  for (const e of data) {
+    if (!byTool[e.tool_name]) byTool[e.tool_name] = 0;
+    byTool[e.tool_name] += e.duration_ms || 0;
   }
+
+  const sorted = Object.entries(byTool).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const values = sorted.map(([, v]) => v);
+  const total = values.reduce((s, v) => s + v, 0);
+
+  let cumPct = 0;
+  const cumulative = values.map(v => {
+    cumPct += (v / total) * 100;
+    return cumPct;
+  });
+
+  const colors = sorted.map(([k]) => toolColor(k));
+
+  if (mainChart) mainChart.destroy();
+
+  mainChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: '耗时',
+          data: values,
+          backgroundColor: colors,
+          borderColor: '#161b22',
+          borderWidth: 1,
+          yAxisID: 'y',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: '累计%',
+          data: cumulative,
+          borderColor: '#f85149',
+          backgroundColor: 'rgba(248,81,73,0.1)',
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: '#f85149',
+          tension: 0.1,
+          yAxisID: 'y1',
+          order: 1,
+        }
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { color: '#8b949e', padding: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              if (ctx.dataset.label === '耗时') {
+                const pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                return `${formatDuration(ctx.raw)} (${pct}%)`;
+              }
+              return `累计: ${ctx.raw.toFixed(1)}%`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: 'rgba(48,54,61,0.3)' } },
+        y: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: '耗时', color: '#8b949e' },
+          ticks: { color: '#8b949e', callback: v => formatDuration(v) },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+        y1: {
+          type: 'linear', position: 'right', min: 0, max: 100,
+          title: { display: true, text: '累计%', color: '#f85149' },
+          ticks: { color: '#f85149', callback: v => v + '%' },
+          grid: { drawOnChartArea: false },
+        },
+      },
+    },
+  });
+}
+
+// === 瀑布图：时间序列显示操作耗时 ===
+function renderWaterfallView(data) {
+  const container = document.getElementById('main-chart');
+  if (!container) return;
+
+  container.innerHTML = '<canvas id="waterfall-canvas"></canvas>';
+  const ctx = document.getElementById('waterfall-canvas');
+
+  if (data.length === 0) {
+    if (mainChart) { mainChart.destroy(); mainChart = null; }
+    return;
+  }
+
+  // 按时间排序，取最近50个操作
+  const sorted = [...data].sort((a, b) => a.start - b.start).slice(-50);
+  const sessionStart = sorted[0]?.start || 0;
+
+  const labels = sorted.map((e, i) => {
+    const t = new Date(e.start);
+    return t.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  });
+
+  // 瀑布图：每个 bar 从上一个结束位置开始
+  let offset = 0;
+  const baseData = [];
+  const durationData = [];
+  const colors = [];
+
+  sorted.forEach(e => {
+    const relativeStart = e.start - sessionStart;
+    // 如果有空隙，填充空白
+    if (relativeStart > offset) {
+      baseData.push(offset);
+      durationData.push(relativeStart - offset);
+      colors.push('rgba(48,54,61,0.3)'); // 空隙用暗色
+    }
+    baseData.push(relativeStart);
+    durationData.push(e.duration_ms || 0);
+    colors.push(toolColor(e.tool_name));
+    offset = relativeStart + (e.duration_ms || 0);
+  });
+
+  if (mainChart) mainChart.destroy();
+
+  mainChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '耗时',
+        data: durationData.slice(-50),
+        backgroundColor: colors.slice(-50),
+        borderColor: '#161b22',
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title(ctx) {
+              const idx = ctx[0].dataIndex;
+              const e = sorted[idx];
+              return e ? `${e.tool_name}` : '';
+            },
+            label(ctx) {
+              const idx = ctx.dataIndex;
+              const e = sorted[idx];
+              if (!e) return '';
+              return [formatDuration(e.duration_ms), (e.tool_input_summary || '').substring(0, 40)];
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { size: 9 }, maxRotation: 45 },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+        y: {
+          stacked: false,
+          title: { display: true, text: '耗时', color: '#8b949e' },
+          ticks: { color: '#8b949e', callback: v => formatDuration(v) },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+      },
+    },
+  });
+}
+
+// === 火焰图：耗时占比可视化 ===
+function renderFlameView(data) {
+  const container = document.getElementById('main-chart');
+  if (!container) return;
+
+  // 火焰图用 HTML 渲染，不用 Canvas
+  container.innerHTML = '<div id="flame-container" style="min-height:300px;overflow:auto;"></div>';
+  const flameContainer = document.getElementById('flame-container');
+
+  if (data.length === 0) {
+    flameContainer.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">暂无数据</div>';
+    return;
+  }
+
+  // 按工具聚合，计算占比
+  const byTool = {};
+  const totalMs = data.reduce((s, e) => s + (e.duration_ms || 0), 0);
+  for (const e of data) {
+    if (!byTool[e.tool_name]) byTool[e.tool_name] = { ms: 0, count: 0, samples: [] };
+    byTool[e.tool_name].ms += e.duration_ms || 0;
+    byTool[e.tool_name].count++;
+    if (byTool[e.tool_name].samples.length < 3) {
+      byTool[e.tool_name].samples.push((e.tool_input_summary || '').substring(0, 30));
+    }
+  }
+
+  const sorted = Object.entries(byTool).sort((a, b) => b[1].ms - a[1].ms);
+  const maxMs = sorted[0]?.[1].ms || 1;
+
+  let html = '<div class="flame-chart">';
+  sorted.forEach(([tool, info]) => {
+    const pct = (info.ms / totalMs * 100).toFixed(1);
+    const widthPct = Math.max(5, (info.ms / maxMs) * 100);
+    const color = toolColor(tool);
+
+    html += `<div class="flame-row">
+      <div class="flame-bar" style="width:${widthPct}%;background:${color};"
+           data-tool="${tool}" data-ms="${info.ms}" data-count="${info.count}" data-pct="${pct}"
+           data-samples="${info.samples.join(' | ')}">
+        <span>${tool} ${formatDuration(info.ms)} (${pct}%)</span>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  flameContainer.innerHTML = html;
+
+  // 添加 tooltip
+  const tooltip = document.getElementById('flame-tooltip') || createFlameTooltip();
+  flameContainer.querySelectorAll('.flame-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', e => {
+      tooltip.innerHTML = `<strong style="color:#58a6ff;">${bar.dataset.tool}</strong>
+        <div style="margin-top:4px;color:#8b949e;">
+          耗时: ${formatDuration(parseInt(bar.dataset.ms))} (${bar.dataset.pct}%)
+        </div>
+        <div style="color:#6e7681;font-size:11px;">调用 ${bar.dataset.count} 次</div>
+        <div style="color:#484f58;font-size:10px;margin-top:2px;">${bar.dataset.samples}</div>`;
+      tooltip.style.display = 'block';
+      positionTooltip(e, tooltip);
+    });
+    bar.addEventListener('mousemove', e => positionTooltip(e, tooltip));
+    bar.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+  });
+}
+
+function createFlameTooltip() {
+  const el = document.createElement('div');
+  el.id = 'flame-tooltip';
+  el.className = 'flame-tooltip';
+  document.body.appendChild(el);
+  return el;
+}
+
+function positionTooltip(e, tooltip) {
+  let x = e.clientX + 12, y = e.clientY + 12;
+  if (x + tooltip.offsetWidth > window.innerWidth) x = e.clientX - tooltip.offsetWidth - 12;
+  if (y + tooltip.offsetHeight > window.innerHeight) y = e.clientY - tooltip.offsetHeight - 12;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
 }
 
 // === 水平条形图：最慢操作排行 ===
@@ -455,63 +723,50 @@ function renderBarChart(data) {
     return;
   }
 
-  try {
-    // 取最慢的15个操作，降序（最慢的在最前面）
-    const sorted = [...data].sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0)).slice(0, 15);
+  const sorted = [...data].sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0)).slice(0, 15);
+  const labels = sorted.map((e, i) => `#${i + 1} ${e.tool_name}`);
+  const values = sorted.map(e => e.duration_ms || 0);
+  const colors = sorted.map(e => toolColor(e.tool_name));
+  const summaries = sorted.map(e => (e.tool_input_summary || '').substring(0, 50));
 
-    const labels = sorted.map((e, i) => `#${i + 1} ${e.tool_name}`);
-    const values = sorted.map(e => e.duration_ms || 0);
-    const colors = sorted.map(e => toolColor(e.tool_name));
-    const summaries = sorted.map(e => (e.tool_input_summary || '').substring(0, 50));
+  if (barChart) barChart.destroy();
 
-    if (barChart) barChart.destroy();
-
-    barChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: '耗时',
-          data: values,
-          backgroundColor: colors,
-          borderColor: '#161b22',
-          borderWidth: 1,
-        }],
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label(ctx) {
-                const summary = summaries[ctx.dataIndex];
-                return [formatDuration(ctx.raw), summary].filter(Boolean);
-              },
+  barChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '耗时',
+        data: values,
+        backgroundColor: colors,
+        borderColor: '#161b22',
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              return [formatDuration(ctx.raw), summaries[ctx.dataIndex]].filter(Boolean);
             },
           },
         },
-        scales: {
-          x: {
-            title: { display: true, text: '耗时', color: '#8b949e' },
-            ticks: {
-              color: '#8b949e',
-              callback: v => formatDuration(v),
-            },
-            grid: { color: 'rgba(48,54,61,0.3)' },
-          },
-          y: {
-            ticks: { color: '#8b949e', font: { size: 11 } },
-            grid: { display: false },
-          },
-        },
       },
-    });
-  } catch (err) {
-    console.error('renderBarChart error:', err);
-  }
+      scales: {
+        x: {
+          title: { display: true, text: '耗时', color: '#8b949e' },
+          ticks: { color: '#8b949e', callback: v => formatDuration(v) },
+          grid: { color: 'rgba(48,54,61,0.3)' },
+        },
+        y: { ticks: { color: '#8b949e', font: { size: 11 } }, grid: { display: false } },
+      },
+    },
+  });
 }
 
 function renderDonut(data) {
@@ -604,7 +859,7 @@ function renderAll(data) {
   }
 
   renderSummary(data);
-  renderPareto(data);
+  renderMainChart(data);
   renderDonut(data);
   renderBarChart(data);
   renderSlowTable(data);
@@ -666,6 +921,13 @@ document.getElementById('auto-refresh-btn').addEventListener('click', function()
   autoRefresh = !autoRefresh;
   this.classList.toggle('active', autoRefresh);
   this.textContent = autoRefresh ? '⟳ 自动' : '⟳ 手动';
+});
+
+// 视图切换
+document.querySelectorAll('.view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    renderMainChart(currentData, btn.dataset.view);
+  });
 });
 
 // === 自动刷新 ===
