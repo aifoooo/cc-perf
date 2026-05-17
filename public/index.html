@@ -109,126 +109,6 @@
     letter-spacing: 0.5px;
   }
   .chart-box canvas { max-height: 400px; min-height: 300px; }
-  .chart-box.gantt-box {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .chart-box.gantt-box h2 {
-    flex-shrink: 0;
-  }
-  .gantt-container {
-    height: 400px;
-    max-height: 50vh;
-    width: 100%;
-    overflow: auto;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #0d1117;
-    position: relative;
-  }
-  /* 自定义甘特图样式 */
-  .custom-gantt {
-    min-width: 100%;
-    width: max-content;
-  }
-  .custom-gantt .gantt-timeline {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-  .custom-gantt .gantt-header-row {
-    display: flex;
-    align-items: flex-end;
-    height: 32px;
-    border-bottom: 1px solid var(--border);
-    padding-left: 160px;
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg);
-  }
-  .custom-gantt .gantt-header-tick {
-    position: absolute;
-    font-size: 10px;
-    color: var(--text-dim);
-    transform: translateX(-50%);
-    white-space: nowrap;
-    bottom: 4px;
-  }
-  .custom-gantt .gantt-header-tick-line {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: var(--border);
-    opacity: 0.4;
-  }
-  .custom-gantt .gantt-task-row {
-    display: flex;
-    align-items: center;
-    height: 32px;
-    border-bottom: 1px solid rgba(48,54,61,0.4);
-    position: relative;
-  }
-  .custom-gantt .gantt-task-row:hover {
-    background: rgba(88,166,255,0.04);
-  }
-  .custom-gantt .gantt-row-label {
-    width: 156px;
-    min-width: 156px;
-    padding: 0 12px 0 4px;
-    font-size: 11px;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--surface);
-    height: 100%;
-    display: flex;
-    align-items: center;
-    border-right: 1px solid var(--border);
-  }
-  .custom-gantt .gantt-task-row:hover .gantt-row-label {
-    background: #1a2332;
-  }
-  .custom-gantt .gantt-row-track {
-    flex: 1;
-    height: 100%;
-    position: relative;
-  }
-  .custom-gantt .gantt-bar {
-    position: absolute;
-    top: 4px;
-    bottom: 4px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: opacity 0.15s;
-    min-width: 4px;
-    opacity: 0.85;
-  }
-  .custom-gantt .gantt-bar:hover {
-    opacity: 1;
-    z-index: 3;
-    box-shadow: 0 0 0 2px rgba(255,255,255,0.3);
-  }
-  .custom-gantt .gantt-tooltip {
-    display: none;
-    position: fixed;
-    background: #161b22;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 14px;
-    color: var(--text);
-    font-size: 12px;
-    z-index: 100;
-    pointer-events: none;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    max-width: 300px;
-  }
   .slow-table {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -313,15 +193,20 @@
 </div>
 
 <div class="chart-row">
-  <div class="chart-box gantt-box">
-    <h2>时间线（甘特图）</h2>
-    <div class="gantt-container">
-      <div id="gantt-chart"></div>
-    </div>
+  <div class="chart-box">
+    <h2>帕累托图（瓶颈定位）</h2>
+    <canvas id="pareto-chart"></canvas>
   </div>
   <div class="chart-box">
     <h2>耗时分布</h2>
     <canvas id="donut-chart"></canvas>
+  </div>
+</div>
+
+<div class="chart-row" style="grid-template-columns: 1fr;">
+  <div class="chart-box">
+    <h2>最慢操作（水平条形图）</h2>
+    <canvas id="bar-chart"></canvas>
   </div>
 </div>
 
@@ -439,111 +324,194 @@ function renderSummary(data) {
   }
 }
 
-function renderGantt(data) {
-  const container = document.getElementById('gantt-chart');
-  if (!container) return;
+// === 帕累托图：快速定位瓶颈（80/20法则） ===
+let paretoChart = null;
+let barChart = null;
+
+function renderPareto(data) {
+  const ctx = document.getElementById('pareto-chart');
+  if (!ctx) return;
 
   if (data.length === 0) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">暂无数据</div>';
+    if (paretoChart) { paretoChart.destroy(); paretoChart = null; }
     return;
   }
 
   try {
-    const sorted = [...data].sort((a, b) => a.start - b.start);
-    const sessionStart = Math.min(...sorted.map(e => e.start));
-    const sessionEnd = Math.max(...sorted.map(e => e.end));
-    const totalSpan = sessionEnd - sessionStart || 1;
-
-    // 动态计算轨道宽度：至少600px，每个任务至少4px bar宽度
-    // 基准：最小任务宽度 8px，第10分位任务至少 20px 宽
-    const minBarPx = 8;
-    const sortedByDur = [...sorted].map(e => e.duration_ms || 1).sort((a, b) => a - b);
-    const p10Dur = sortedByDur[Math.floor(sortedByDur.length * 0.1)] || sortedByDur[0];
-    const pxPerMsTarget = 20 / p10Dur;
-    const trackWidthByTask = totalSpan * pxPerMsTarget;
-    const trackWidth = Math.max(800, Math.min(trackWidthByTask, 4000));
-    const pxPerMs = trackWidth / totalSpan;
-    const labelWidth = 160;
-
-    // 生成时间刻度（5个等分点）
-    const tickCount = 5;
-    const ticks = [];
-    for (let i = 0; i <= tickCount; i++) {
-      const offsetMs = (totalSpan / tickCount) * i;
-      const tickTime = new Date(sessionStart + offsetMs);
-      ticks.push({
-        label: tickTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        left: (offsetMs * pxPerMs).toFixed(1),
-      });
+    // 按工具聚合耗时
+    const byTool = {};
+    for (const e of data) {
+      if (!byTool[e.tool_name]) byTool[e.tool_name] = 0;
+      byTool[e.tool_name] += e.duration_ms || 0;
     }
 
-    // 构建 HTML
-    let html = `<div class="custom-gantt" style="width:${labelWidth + trackWidth}px;min-width:100%;">`;
-    html += `<div class="gantt-header-row" style="position:relative;width:${labelWidth + trackWidth}px;">`;
-    ticks.forEach(t => {
-      html += `<div class="gantt-header-tick" style="left:${labelWidth + parseFloat(t.left)}px;">${t.label}</div>`;
-      html += `<div class="gantt-header-tick-line" style="left:${labelWidth + parseFloat(t.left)}px;"></div>`;
-    });
-    html += `</div>`;
-    html += `<div class="gantt-timeline">`;
+    // 按耗时降序排序
+    const sorted = Object.entries(byTool).sort((a, b) => b[1] - a[1]);
+    const labels = sorted.map(([k]) => k);
+    const values = sorted.map(([, v]) => v);
+    const total = values.reduce((s, v) => s + v, 0);
 
-    sorted.forEach((e, i) => {
-      const left = ((e.start - sessionStart) * pxPerMs).toFixed(1);
-      const width = Math.max(minBarPx, e.duration_ms * pxPerMs).toFixed(1);
-      const color = toolColor(e.tool_name);
-      const summary = (e.tool_input_summary || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-      const duration = formatDuration(e.duration_ms);
-
-      html += `<div class="gantt-task-row" style="width:${labelWidth + trackWidth}px;">`;
-      html += `<span class="gantt-row-label" title="${e.tool_name}">${i + 1}. ${e.tool_name}</span>`;
-      html += `<div class="gantt-row-track">`;
-      html += `<div class="gantt-bar"
-          style="left:${left}px;width:${width}px;background:${color};"
-          data-tool="${e.tool_name}"
-          data-duration="${duration}"
-          data-summary="${summary}">`;
-      html += `</div>`;
-      html += `</div>`;
-      html += `</div>`;
+    // 计算累计百分比
+    let cumPct = 0;
+    const cumulative = values.map(v => {
+      cumPct += (v / total) * 100;
+      return cumPct;
     });
 
-    html += `</div></div>`;
-    container.innerHTML = html;
+    const colors = sorted.map(([k]) => toolColor(k));
 
-    // 添加 tooltip 交互
-    const tooltip = document.getElementById('gantt-tooltip') || createTooltip();
-    container.querySelectorAll('.gantt-bar').forEach(bar => {
-      bar.addEventListener('mouseenter', (e) => {
-        tooltip.innerHTML = `<strong style="color:#58a6ff;">${bar.dataset.tool}</strong>
-          <span style="margin-left:8px;color:#8b949e;">${bar.dataset.duration}</span>
-          ${bar.dataset.summary ? `<div style="margin-top:4px;color:#6e7681;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${bar.dataset.summary}</div>` : ''}`;
-        tooltip.style.display = 'block';
-        updateTooltipPos(e, tooltip);
-      });
-      bar.addEventListener('mousemove', (e) => updateTooltipPos(e, tooltip));
-      bar.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    if (paretoChart) paretoChart.destroy();
+
+    paretoChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: '耗时',
+            data: values,
+            backgroundColor: colors,
+            borderColor: '#161b22',
+            borderWidth: 1,
+            yAxisID: 'y',
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: '累计%',
+            data: cumulative,
+            borderColor: '#f85149',
+            backgroundColor: 'rgba(248,81,73,0.1)',
+            borderWidth: 2,
+            pointRadius: 4,
+            pointBackgroundColor: '#f85149',
+            tension: 0.1,
+            yAxisID: 'y1',
+            order: 1,
+          }
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { color: '#8b949e', padding: 16, font: { size: 11 } },
+          },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                if (ctx.dataset.label === '耗时') {
+                  const pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                  return `${ctx.label}: ${formatDuration(ctx.raw)} (${pct}%)`;
+                }
+                return `累计: ${ctx.raw.toFixed(1)}%`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#8b949e', font: { size: 10 } },
+            grid: { color: 'rgba(48,54,61,0.3)' },
+          },
+          y: {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: '耗时', color: '#8b949e' },
+            ticks: {
+              color: '#8b949e',
+              callback: v => formatDuration(v),
+            },
+            grid: { color: 'rgba(48,54,61,0.3)' },
+          },
+          y1: {
+            type: 'linear',
+            position: 'right',
+            min: 0,
+            max: 100,
+            title: { display: true, text: '累计%', color: '#f85149' },
+            ticks: { color: '#f85149', callback: v => v + '%' },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
     });
   } catch (err) {
-    console.error('renderGantt error:', err);
-    container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">甘特图渲染错误: ${err.message}</div>`;
+    console.error('renderPareto error:', err);
   }
 }
 
-function createTooltip() {
-  const el = document.createElement('div');
-  el.id = 'gantt-tooltip';
-  el.className = 'gantt-tooltip';
-  document.body.appendChild(el);
-  return el;
-}
+// === 水平条形图：最慢操作排行 ===
+function renderBarChart(data) {
+  const ctx = document.getElementById('bar-chart');
+  if (!ctx) return;
 
-function updateTooltipPos(e, tooltip) {
-  let x = e.clientX + 12;
-  let y = e.clientY - 10;
-  if (x + tooltip.offsetWidth > window.innerWidth) x = e.clientX - tooltip.offsetWidth - 12;
-  if (y + tooltip.offsetHeight > window.innerHeight) y = e.clientY - tooltip.offsetHeight - 10;
-  tooltip.style.left = x + 'px';
-  tooltip.style.top = y + 'px';
+  if (data.length === 0) {
+    if (barChart) { barChart.destroy(); barChart = null; }
+    return;
+  }
+
+  try {
+    // 取最慢的15个操作，降序（最慢的在最前面）
+    const sorted = [...data].sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0)).slice(0, 15);
+
+    const labels = sorted.map((e, i) => `#${i + 1} ${e.tool_name}`);
+    const values = sorted.map(e => e.duration_ms || 0);
+    const colors = sorted.map(e => toolColor(e.tool_name));
+    const summaries = sorted.map(e => (e.tool_input_summary || '').substring(0, 50));
+
+    if (barChart) barChart.destroy();
+
+    barChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: '耗时',
+          data: values,
+          backgroundColor: colors,
+          borderColor: '#161b22',
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const summary = summaries[ctx.dataIndex];
+                return [formatDuration(ctx.raw), summary].filter(Boolean);
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: '耗时', color: '#8b949e' },
+            ticks: {
+              color: '#8b949e',
+              callback: v => formatDuration(v),
+            },
+            grid: { color: 'rgba(48,54,61,0.3)' },
+          },
+          y: {
+            ticks: { color: '#8b949e', font: { size: 11 } },
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  } catch (err) {
+    console.error('renderBarChart error:', err);
+  }
 }
 
 function renderDonut(data) {
@@ -636,10 +604,10 @@ function renderAll(data) {
   }
 
   renderSummary(data);
-  renderGantt(data);
+  renderPareto(data);
   renderDonut(data);
+  renderBarChart(data);
   renderSlowTable(data);
-  console.log('renderAll done, data count:', data.length);
 }
 
 // === 主流程 ===
