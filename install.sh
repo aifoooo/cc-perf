@@ -87,11 +87,11 @@ if (!data.hooks) data.hooks = {};
 
 const PRE = {
   matcher: '*',
-  hooks: [{ type: 'command', command: 'node $CC_PERF_DIR/hooks/pre-tool-use.js', timeout: 5 }]
+  hooks: [{ type: 'command', command: 'node \"$CC_PERF_DIR/hooks/pre-tool-use.js\"', timeout: 5 }]
 };
 const POST = {
   matcher: '*',
-  hooks: [{ type: 'command', command: 'node $CC_PERF_DIR/hooks/post-tool-use.js', timeout: 5 }]
+  hooks: [{ type: 'command', command: 'node \"$CC_PERF_DIR/hooks/post-tool-use.js\"', timeout: 5 }]
 };
 
 function hasCCPerf(arr) {
