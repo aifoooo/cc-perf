@@ -4,7 +4,7 @@
  *
  * 零运行时依赖，仅使用 Node.js 内置模块。
  * 端口: 3100，监听 127.0.0.1
- * 30 分钟无操作自动关闭
+ * 通过 launchd 常驻运行
  */
 
 const http = require('http');
@@ -17,9 +17,6 @@ const HOST = '127.0.0.1';
 const TIMING_DIR = path.join(os.homedir(), '.claude', 'timing');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const PID_FILE = path.join(TIMING_DIR, '.server.pid');
-const INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 分钟
-
-let inactivityTimer;
 
 // 确保数据目录存在
 fs.mkdirSync(TIMING_DIR, { recursive: true });
@@ -107,8 +104,6 @@ function serveStatic(res, filePath) {
 // === 服务器 ===
 
 const server = http.createServer((req, res) => {
-  resetInactivityTimer();
-
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -201,15 +196,6 @@ const server = http.createServer((req, res) => {
   res.end('Not Found');
 });
 
-function resetInactivityTimer() {
-  clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(() => {
-    console.log('[cc-perf] 30 分钟无操作，自动关闭服务器');
-    cleanup();
-    process.exit(0);
-  }, INACTIVITY_TIMEOUT);
-}
-
 function cleanup() {
   try {
     if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
@@ -237,7 +223,6 @@ server.listen(PORT, HOST, () => {
     fs.writeFileSync(PID_FILE, String(process.pid));
   } catch {}
 
-  resetInactivityTimer();
   console.log(`\ncc-perf 仪表板已启动: http://${HOST}:${PORT}\n`);
 });
 

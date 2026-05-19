@@ -67,7 +67,18 @@ fs.writeFileSync('$HOME_DIR/.claude/settings.local.json',JSON.stringify(d,null,2
 fi
 echo "OK"
 
-# 6. 停止并移除 cc-switch-watch LaunchAgent
+# 6. 停止并移除 cc-perf 仪表板 LaunchAgent
+echo -n "移除 cc-perf 仪表板 LaunchAgent... "
+PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.cc-perf.dashboard.plist"
+if [[ -f "$PLIST_PATH" ]]; then
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    rm -f "$PLIST_PATH"
+    echo "OK"
+else
+    echo "跳过"
+fi
+
+# 7. 停止并移除 cc-switch-watch LaunchAgent
 echo -n "移除 cc-switch-watch LaunchAgent... "
 PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.cc-perf.switch-watch.plist"
 if [[ -f "$PLIST_PATH" ]]; then
@@ -78,7 +89,7 @@ else
     echo "跳过"
 fi
 
-# 7. 停止后台守护进程
+# 8. 停止后台守护进程
 echo -n "停止 cc-switch-watch 守护进程... "
 PID_FILE="$HOME_DIR/.claude/timing/.cc-switch-watch.pid"
 if [[ -f "$PID_FILE" ]]; then

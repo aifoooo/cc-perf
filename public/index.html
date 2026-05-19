@@ -278,6 +278,7 @@
         <button class="view-btn active" data-view="pareto">帕累托</button>
         <button class="view-btn" data-view="waterfall">瀑布图</button>
         <button class="view-btn" data-view="flame">火焰图</button>
+        <button class="view-btn" data-view="swimlane">泳道图</button>
       </div>
     </div>
     <div id="main-chart" style="min-height:300px;"></div>
@@ -285,13 +286,6 @@
   <div class="chart-box">
     <h2>耗时分布</h2>
     <canvas id="donut-chart"></canvas>
-  </div>
-</div>
-
-<div class="chart-row" style="grid-template-columns: 1fr;">
-  <div class="chart-box">
-    <h2>最慢操作 Top 15</h2>
-    <canvas id="bar-chart"></canvas>
   </div>
 </div>
 
@@ -411,13 +405,13 @@ function renderSummary(data) {
 
 // === 主图表（支持多视图切换） ===
 let mainChart = null;
-let barChart = null;
 let currentView = 'pareto';
 
 const VIEW_TITLES = {
   pareto: '帕累托图（瓶颈定位）',
   waterfall: '瀑布图（时间序列）',
   flame: '火焰图（耗时占比）',
+  swimlane: '泳道图（时间线分布）',
 };
 
 function renderMainChart(data, view = currentView) {
@@ -434,6 +428,7 @@ function renderMainChart(data, view = currentView) {
     case 'pareto': renderParetoView(data); break;
     case 'waterfall': renderWaterfallView(data); break;
     case 'flame': renderFlameView(data); break;
+    case 'swimlane': renderSwimlaneView(data); break;
   }
 }
 
@@ -713,59 +708,91 @@ function positionTooltip(e, tooltip) {
   tooltip.style.top = y + 'px';
 }
 
-// === 水平条形图：最慢操作排行 ===
-function renderBarChart(data) {
-  const ctx = document.getElementById('bar-chart');
-  if (!ctx) return;
+// === 泳道图：时间线分布 ===
+function renderSwimlaneView(data) {
+  const container = document.getElementById('main-chart');
+  if (!container) return;
+
+  container.innerHTML = '<div id="swimlane-container" style="min-height:350px;overflow-x:auto;"></div>';
+  const swimlaneContainer = document.getElementById('swimlane-container');
 
   if (data.length === 0) {
-    if (barChart) { barChart.destroy(); barChart = null; }
+    swimlaneContainer.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">暂无数据</div>';
     return;
   }
 
-  const sorted = [...data].sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0)).slice(0, 15);
-  const labels = sorted.map((e, i) => `#${i + 1} ${e.tool_name}`);
-  const values = sorted.map(e => e.duration_ms || 0);
-  const colors = sorted.map(e => toolColor(e.tool_name));
-  const summaries = sorted.map(e => (e.tool_input_summary || '').substring(0, 50));
+  // 按时间排序
+  const sorted = [...data].sort((a, b) => a.start - b.start);
+  const minTime = sorted[0]?.start || 0;
+  const maxTime = Math.max(...sorted.map(e => e.end || 0));
+  const timeRange = maxTime - minTime || 1;
 
-  if (barChart) barChart.destroy();
+  // 按工具类型分组
+  const byTool = {};
+  for (const e of sorted) {
+    if (!byTool[e.tool_name]) byTool[e.tool_name] = [];
+    byTool[e.tool_name].push(e);
+  }
 
-  barChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: '耗时',
-        data: values,
-        backgroundColor: colors,
-        borderColor: '#161b22',
-        borderWidth: 1,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label(ctx) {
-              return [formatDuration(ctx.raw), summaries[ctx.dataIndex]].filter(Boolean);
-            },
-          },
-        },
-      },
-      scales: {
-        x: {
-          title: { display: true, text: '耗时', color: '#8b949e' },
-          ticks: { color: '#8b949e', callback: v => formatDuration(v) },
-          grid: { color: 'rgba(48,54,61,0.3)' },
-        },
-        y: { ticks: { color: '#8b949e', font: { size: 11 } }, grid: { display: false } },
-      },
-    },
+  // 按总耗时排序工具
+  const toolOrder = Object.entries(byTool)
+    .map(([tool, entries]) => ({
+      tool,
+      entries,
+      totalMs: entries.reduce((s, e) => s + (e.duration_ms || 0), 0)
+    }))
+    .sort((a, b) => b.totalMs - a.totalMs);
+
+  // 渲染泳道
+  let html = '<div class="swimlane-chart">';
+  html += '<div class="swimlane-header" style="display:flex;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px;">';
+  html += '<div style="width:80px;color:var(--text-dim);font-size:11px;font-weight:600;">工具</div>';
+  html += '<div style="flex:1;display:flex;justify-content:space-between;color:var(--text-dim);font-size:10px;">';
+  html += '<span>开始</span><span>时间线</span><span>结束</span></div></div>';
+
+  for (const { tool, entries, totalMs } of toolOrder) {
+    const color = toolColor(tool);
+    html += `<div class="swimlane-row" style="display:flex;align-items:center;margin-bottom:6px;min-height:24px;">`;
+    html += `<div style="width:80px;font-size:11px;font-weight:500;color:var(--text);">${tool}</div>`;
+    html += `<div class="swimlane-track" style="flex:1;position:relative;height:20px;background:rgba(48,54,61,0.2);border-radius:3px;">`;
+
+    for (const e of entries) {
+      const startPct = ((e.start - minTime) / timeRange) * 100;
+      const widthPct = Math.max(0.3, ((e.duration_ms || 0) / timeRange) * 100);
+      const left = startPct;
+      const title = `${e.tool_name}: ${formatDuration(e.duration_ms)}\n${(e.tool_input_summary || '').substring(0, 60)}`;
+
+      html += `<div class="swimlane-bar" style="
+        position:absolute;
+        left:${left}%;
+        width:${widthPct}%;
+        height:16px;
+        top:2px;
+        background:${color};
+        border-radius:2px;
+        cursor:pointer;
+        transition:filter 0.15s;
+        min-width:2px;
+      " title="${title}" data-tool="${tool}" data-ms="${e.duration_ms}" data-summary="${(e.tool_input_summary || '').substring(0, 40)}"></div>`;
+    }
+
+    html += '</div></div>';
+  }
+  html += '</div>';
+  swimlaneContainer.innerHTML = html;
+
+  // 添加 tooltip 交互
+  const tooltip = document.getElementById('flame-tooltip') || createFlameTooltip();
+  swimlaneContainer.querySelectorAll('.swimlane-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', e => {
+      tooltip.innerHTML = `<strong style="color:#58a6ff;">${bar.dataset.tool}</strong>
+        <div style="margin-top:4px;color:#8b949e;">耗时: ${formatDuration(parseInt(bar.dataset.ms))}</div>
+        <div style="color:#6e7681;font-size:11px;margin-top:2px;">${bar.dataset.summary}</div>`;
+      tooltip.style.display = 'block';
+      positionTooltip(e, tooltip);
+    });
+    bar.addEventListener('mousemove', e => positionTooltip(e, tooltip));
+    bar.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
   });
 }
 
@@ -861,7 +888,6 @@ function renderAll(data) {
   renderSummary(data);
   renderMainChart(data);
   renderDonut(data);
-  renderBarChart(data);
   renderSlowTable(data);
 }
 

@@ -128,7 +128,36 @@ fs.writeFileSync('$GLOBAL_COMMANDS/perf.md',c);
 " 2>/dev/null || true
 echo -e "${GREEN}OK${NC}"
 
-# === 7. 验证 ===
+# === 7. 注册 launchd 服务 ===
+echo -n "注册 launchd 服务... "
+NODE_PATH=$(which node)
+PLIST_SRC="$CC_PERF_DIR/scripts/com.cc-perf.dashboard.plist"
+PLIST_DST="$HOME_DIR/Library/LaunchAgents/com.cc-perf.dashboard.plist"
+SERVER_PATH="$CC_PERF_DIR/scripts/server.js"
+
+if [[ -f "$PLIST_SRC" ]]; then
+    # 确保 LaunchAgents 目录存在
+    mkdir -p "$HOME_DIR/Library/LaunchAgents"
+
+    # 生成 plist，替换占位符
+    sed -e "s|/usr/local/bin/node|$NODE_PATH|g" \
+        -e "s|__SERVER_PATH__|$SERVER_PATH|g" \
+        "$PLIST_SRC" > "$PLIST_DST"
+
+    # 如果服务已在运行，先卸载再重新加载
+    if launchctl list "com.cc-perf.dashboard" &>/dev/null; then
+        launchctl unload "$PLIST_DST" 2>/dev/null || true
+    fi
+
+    # 加载服务
+    launchctl load "$PLIST_DST" 2>/dev/null
+
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${YELLOW}plist 模板不存在，跳过${NC}"
+fi
+
+# === 8. 验证 ===
 echo ""
 echo -e "${GREEN}=== 验证安装 ===${NC}"
 
@@ -148,11 +177,14 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  cc-perf 安装完成！${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "  下一步:"
-echo "  1. 重启 Claude Code（或开新会话）使 hooks 生效"
-echo "  2. 每步操作后终端会显示耗时: [cc-perf] 2.3s  Bash: ..."
-echo "  3. /perf start → 启动 Web 仪表板"
-echo "  4. 浏览器打开 http://127.0.0.1:3100"
+echo "  服务已作为 LaunchAgent 注册，将开机自启并常驻运行"
 echo ""
+echo "  用法:"
+echo "    /perf          - 显示当前会话耗时摘要"
+echo "    /perf start    - 打开仪表板（服务已自动启动）"
+echo "    /perf stop     - 暂停仪表板服务"
+echo "    /perf status   - 查看统计摘要"
+echo ""
+echo "  仪表板: http://127.0.0.1:3100"
 echo "  数据目录: ~/.claude/timing/"
 echo "  卸载: bash uninstall.sh"

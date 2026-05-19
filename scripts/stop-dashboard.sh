@@ -1,20 +1,19 @@
 #!/bin/bash
 # cc-perf 仪表板停止脚本
+# 使用 launchd 管理常驻服务
 
-TIMING_DIR="$HOME/.claude/timing"
-PID_FILE="$TIMING_DIR/.server.pid"
+PLIST_NAME="com.cc-perf.dashboard"
+PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 
-if [ -f "$PID_FILE" ]; then
-  PID=$(cat "$PID_FILE")
-  if kill -0 "$PID" 2>/dev/null; then
-    echo "停止 cc-perf 仪表板 (PID: $PID)..."
-    kill "$PID"
-    rm -f "$PID_FILE"
-    echo "已停止"
-  else
-    echo "服务器未在运行（僵尸 PID 文件已清理）"
-    rm -f "$PID_FILE"
-  fi
-else
-  echo "cc-perf 仪表板未运行（无 PID 文件）"
+# 检查服务是否在运行
+if ! launchctl list "$PLIST_NAME" &>/dev/null; then
+    echo "cc-perf 仪表板未运行"
+    exit 0
 fi
+
+echo "停止 cc-perf 仪表板..."
+
+# 停止并卸载服务
+launchctl unload "$PLIST_PATH" 2>/dev/null
+
+echo "已停止"
